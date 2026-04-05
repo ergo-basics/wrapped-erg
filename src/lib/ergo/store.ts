@@ -1,5 +1,4 @@
 import { writable, derived } from 'svelte/store';
-import { browser } from '$app/environment';
 import type { WergState } from './wrappedErg';
 import {
     MAINNET_EXPLORER_URI_TX,
@@ -39,7 +38,9 @@ export const txError = writable<string | null>(null);
 export const txHistory = writable<TxRecord[]>([]);
 
 // Load tx history from localStorage
-if (browser) {
+const isBrowser = typeof window !== 'undefined' && typeof localStorage !== 'undefined';
+
+if (isBrowser) {
     try {
         const stored = localStorage.getItem('werg_tx_history');
         if (stored) {

@@ -16,6 +16,9 @@ function esRawPlugin() {
 
 export default defineConfig({
 	plugins: [esRawPlugin(), sveltekit()],
+	build: {
+		chunkSizeWarningLimit: 8000
+	},
 	optimizeDeps: {
 		esbuildOptions: {
 			loader: {

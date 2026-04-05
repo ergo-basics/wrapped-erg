@@ -1,6 +1,5 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { browser } from '$app/environment';
     import {
         connected,
         address,
@@ -18,7 +17,6 @@
     import type { TxRecord } from '$lib/ergo/store';
     import { EXPLORER_URI_TX } from '$lib/ergo/envs';
 
-    let WalletButton: any = null;
     let manager: WrappedErgManager | null = null;
 
     let wrapAmount = '';
@@ -36,23 +34,15 @@
     let newBankWerg = '0';
 
     onMount(async () => {
-        if (browser) {
-            try {
-                const walletModule = await import('wallet-svelte-component');
-                WalletButton = walletModule.WalletButton;
-            } catch (e) {
-                console.warn('wallet-svelte-component not available:', e);
-            }
-        }
         await refreshBanks();
     });
 
-    $: if ($connected && browser) {
+    $: if ($connected && typeof window !== 'undefined') {
         initManager();
     }
 
     async function initManager() {
-        if (!browser) return;
+        if (typeof window === 'undefined') return;
         try {
             const w: any = window;
             const ergoWallet = w.ergoConnector?.nautilus;
@@ -83,7 +73,7 @@
     async function selectBank(bank: WrappedErgBankSummary) {
         selectedBankNft = bank.bankNft;
         selectedWergTokenId = bank.wergTokenId;
-        if (browser && $connected) {
+        if (typeof window !== 'undefined' && $connected) {
             await initManager();
         }
     }
@@ -189,7 +179,7 @@
     }
 
     async function connectWallet() {
-        if (!browser) return;
+        if (typeof window === 'undefined') return;
         try {
             const w = window as any;
             const nautilus = w.ergoConnector?.nautilus;
@@ -226,13 +216,9 @@
     </div>
 
     <div class="flex justify-center">
-        {#if WalletButton}
-            <svelte:component this={WalletButton} />
-        {:else}
-            <button class="px-6 py-3 rounded-lg bg-primary text-primary-foreground font-medium" on:click={connectWallet}>
-                {$connected ? '✓ Connected' : '🔗 Connect Nautilus Wallet'}
-            </button>
-        {/if}
+        <button class="px-6 py-3 rounded-lg bg-primary text-primary-foreground font-medium" on:click={connectWallet}>
+            {$connected ? '✓ Connected' : '🔗 Connect Nautilus Wallet'}
+        </button>
     </div>
 
     <div class="rounded-xl border border-border/50 bg-card p-5 space-y-4">
