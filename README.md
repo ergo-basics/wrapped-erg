@@ -1,7 +1,29 @@
 # wrapped-erg
-Wrapped Erg token contract
+Wrapped Erg token contract + app + reusable library API
 
 Based on https://github.com/ergo-basics/template
+
+## Current scope
+
+This repo now targets three use cases:
+
+- wrapped ERG web app
+- bank discovery + bank creation UX
+- reusable `index.ts` library exports for other Ergo apps
+
+### Library-first additions
+
+The public API now includes:
+
+- `WrappedErgManager`
+- `listWrappedErgBanks()`
+- `buildCreateBankTx(...)`
+- `buildWrapTx(...)`
+- `buildUnwrapTx(...)`
+
+Those `build*` methods return unsigned tx objects so downstream apps can support chained transaction flows.
+
+See `LIBRARY.md` for usage.
 
 
 ### 1. El Contrato Inteligente (ErgoScript)

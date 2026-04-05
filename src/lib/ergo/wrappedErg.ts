@@ -1,227 +1,286 @@
-import { TransactionBuilder, OutputBuilder, SAFE_MIN_BOX_VALUE } from "@fleet-sdk/core";
-import { compile } from "@fleet-sdk/compiler";
-import { BANK_NFT_ID, WERG_TOKEN_ID, EXPLORER_API } from "./envs";
-
-// ============================================================
-// Types
-// ============================================================
+import { TransactionBuilder, OutputBuilder, SAFE_MIN_BOX_VALUE } from '@fleet-sdk/core';
+import { compile } from '@fleet-sdk/compiler';
+import {
+  BANK_NFT_ID,
+  WERG_TOKEN_ID,
+  EXPLORER_API,
+  DEFAULT_FEE,
+  MIN_BOX_VALUE
+} from './envs';
 
 export interface WergState {
-    boxId: string;
-    ergReserve: bigint;
-    wergReserve: bigint;
-    ergoTree: string;
+  boxId: string;
+  ergReserve: bigint;
+  wergReserve: bigint;
+  ergoTree: string;
+}
+
+export interface ExplorerAsset {
+  tokenId: string;
+  amount: number;
+  name?: string;
+  decimals?: number;
 }
 
 export interface ExplorerBox {
-    boxId: string;
-    value: number;
-    ergoTree: string;
-    assets: Array<{
-        tokenId: string;
-        amount: number;
-    }>;
-    additionalRegisters: Record<string, string>;
-    creationHeight: number;
-    transactionId: string;
-    index: number;
+  boxId: string;
+  value: number;
+  ergoTree: string;
+  assets: ExplorerAsset[];
+  additionalRegisters: Record<string, string>;
+  creationHeight: number;
+  transactionId: string;
+  index: number;
+  address?: string;
 }
 
-// ============================================================
-// Explorer API helpers
-// ============================================================
+export interface WrappedErgBankSummary extends WergState {
+  bankNft: string;
+  wergTokenId: string;
+}
+
+export interface CreateBankParams {
+  bankNft: string;
+  wergTokenId: string;
+  initialErgReserve: bigint;
+  initialWergReserve: bigint;
+}
+
+export interface WrapParams {
+  amountNanoErg: bigint;
+  bankNft?: string;
+  wergTokenId?: string;
+}
+
+export interface UnwrapParams {
+  amountWerg: bigint;
+  bankNft?: string;
+  wergTokenId?: string;
+}
+
+export type UnsignedTxLike = ReturnType<ReturnType<TransactionBuilder['build']>['toEIP12Object']>;
+
+async function fetchJson(url: string) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Request failed: ${url}`);
+  return res.json();
+}
 
 async function fetchCurrentHeight(): Promise<number> {
-    const res = await fetch(`${EXPLORER_API}/blocks?limit=1&offset=0&sortBy=height&sortDirection=desc`);
-    if (!res.ok) throw new Error('Failed to fetch current height');
-    const data = await res.json();
-    return data.items[0].height;
+  const data = await fetchJson(`${EXPLORER_API}/blocks?limit=1&offset=0&sortBy=height&sortDirection=desc`);
+  return data.items[0].height;
 }
 
 async function fetchUnspentBoxesByTokenId(tokenId: string): Promise<ExplorerBox[]> {
-    const res = await fetch(`${EXPLORER_API}/boxes/unspent/byTokenId/${tokenId}?limit=10&offset=0`);
-    if (!res.ok) throw new Error(`Failed to fetch boxes for token ${tokenId}`);
-    const data = await res.json();
-    return data.items || [];
+  const data = await fetchJson(`${EXPLORER_API}/boxes/unspent/byTokenId/${tokenId}?limit=50&offset=0`);
+  return data.items || [];
 }
 
 async function submitTx(signedTx: any): Promise<string> {
-    const res = await fetch(`${EXPLORER_API}/mempool/transactions/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(signedTx)
-    });
-    if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Failed to submit transaction: ${errText}`);
-    }
-    const data = await res.json();
-    return data.id;
+  const res = await fetch(`${EXPLORER_API}/mempool/transactions/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(signedTx)
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`Failed to submit transaction: ${errText}`);
+  }
+  const data = await res.json();
+  return data.id;
 }
-
-// ============================================================
-// Compile the bank contract
-// ============================================================
 
 function compileBankContract(bankNFT: string, wergTokenId: string): string {
-    const script = `
-    {
-        val isBankOutput = OUTPUTS(0).propositionBytes == SELF.propositionBytes
-        val exactTokens = OUTPUTS(0).tokens.size == 2
-        val keepsNFT    = OUTPUTS(0).tokens(0)._1 == fromBase16("${bankNFT}")
-        val keepsWergID = OUTPUTS(0).tokens(1)._1 == fromBase16("${wergTokenId}")
-        
-        val ergIn  = SELF.value
-        val wergIn = SELF.tokens(1)._2
-        val ergOut  = OUTPUTS(0).value
-        val wergOut = OUTPUTS(0).tokens(1)._2
-        
-        val validExchange = (ergOut + wergOut) == (ergIn + wergIn)
-        
-        sigmaProp(isBankOutput && exactTokens && keepsNFT && keepsWergID && validExchange)
-    }
-    `;
-    return compile(script).toHex();
+  const script = `
+  {
+      val isBankOutput = OUTPUTS(0).propositionBytes == SELF.propositionBytes
+      val exactTokens = OUTPUTS(0).tokens.size == 2
+      val keepsNFT    = OUTPUTS(0).tokens(0)._1 == fromBase16("${bankNFT}")
+      val keepsWergID = OUTPUTS(0).tokens(1)._1 == fromBase16("${wergTokenId}")
+
+      val ergIn  = SELF.value
+      val wergIn = SELF.tokens(1)._2
+      val ergOut  = OUTPUTS(0).value
+      val wergOut = OUTPUTS(0).tokens(1)._2
+
+      val validExchange = (ergOut + wergOut) == (ergIn + wergIn)
+
+      sigmaProp(isBankOutput && exactTokens && keepsNFT && keepsWergID && validExchange)
+  }
+  `;
+  return compile(script).toHex();
 }
 
-// ============================================================
-// WrappedErgManager
-// ============================================================
+function buildBankOutput(bankTree: string, bankNFT: string, wergTokenId: string, ergAmount: bigint, wergAmount: bigint) {
+  return new OutputBuilder(ergAmount, bankTree)
+    .addTokens({ tokenId: bankNFT, amount: 1n })
+    .addTokens({ tokenId: wergTokenId, amount: wergAmount });
+}
 
 export class WrappedErgManager {
-    private readonly bankNFT: string;
-    private readonly wergTokenId: string;
-    private readonly bankTree: string;
-    private readonly wallet: any; // Nautilus dApp Connector
+  private readonly wallet: any;
+  readonly bankNFT: string;
+  readonly wergTokenId: string;
+  readonly bankTree: string;
 
-    constructor(wallet: any, bankNFT?: string, wergTokenId?: string) {
-        this.bankNFT = bankNFT ?? BANK_NFT_ID;
-        this.wergTokenId = wergTokenId ?? WERG_TOKEN_ID;
-        this.wallet = wallet;
-        this.bankTree = compileBankContract(this.bankNFT, this.wergTokenId);
-    }
+  constructor(wallet: any, bankNFT?: string, wergTokenId?: string) {
+    this.wallet = wallet;
+    this.bankNFT = bankNFT ?? BANK_NFT_ID;
+    this.wergTokenId = wergTokenId ?? WERG_TOKEN_ID;
+    this.bankTree = compileBankContract(this.bankNFT, this.wergTokenId);
+  }
 
-    /**
-     * Fetch the current Bank Box from the blockchain.
-     * The bank box is a singleton identified by the BankNFT.
-     */
-    async fetchBankBox(): Promise<ExplorerBox> {
-        const unspentBoxes = await fetchUnspentBoxesByTokenId(this.bankNFT);
-        if (unspentBoxes.length === 0) {
-            throw new Error('Bank box not found on the network. It may not be deployed yet.');
-        }
-        return unspentBoxes[0];
-    }
+  static compileBankContract(bankNFT: string, wergTokenId: string): string {
+    return compileBankContract(bankNFT, wergTokenId);
+  }
 
-    /**
-     * Get the current state of the WERG bank.
-     */
-    async getState(): Promise<WergState> {
-        const bankBox = await this.fetchBankBox();
-        const wergToken = bankBox.assets.find((t) => t.tokenId === this.wergTokenId);
-        if (!wergToken) {
-            throw new Error('WERG token not found in bank box');
-        }
-
+  static async listBanks(): Promise<WrappedErgBankSummary[]> {
+    const boxes = await fetchUnspentBoxesByTokenId(BANK_NFT_ID);
+    return boxes
+      .filter((box) => box.assets.length >= 2)
+      .map((box) => {
+        const bankNft = box.assets[0]?.tokenId;
+        const werg = box.assets[1];
         return {
-            boxId: bankBox.boxId,
-            ergReserve: BigInt(bankBox.value),
-            wergReserve: BigInt(wergToken.amount),
-            ergoTree: bankBox.ergoTree
+          boxId: box.boxId,
+          ergReserve: BigInt(box.value),
+          wergReserve: BigInt(werg?.amount ?? 0),
+          ergoTree: box.ergoTree,
+          bankNft,
+          wergTokenId: werg?.tokenId ?? ''
         };
+      });
+  }
+
+  async fetchBankBox(bankNft = this.bankNFT): Promise<ExplorerBox> {
+    const unspentBoxes = await fetchUnspentBoxesByTokenId(bankNft);
+    if (unspentBoxes.length === 0) {
+      throw new Error('Bank box not found on the network. It may not be deployed yet.');
+    }
+    return unspentBoxes[0];
+  }
+
+  async getState(bankNft = this.bankNFT, wergTokenId = this.wergTokenId): Promise<WergState> {
+    const bankBox = await this.fetchBankBox(bankNft);
+    const wergToken = bankBox.assets.find((t) => t.tokenId === wergTokenId);
+    if (!wergToken) throw new Error('WERG token not found in bank box');
+    return {
+      boxId: bankBox.boxId,
+      ergReserve: BigInt(bankBox.value),
+      wergReserve: BigInt(wergToken.amount),
+      ergoTree: bankBox.ergoTree
+    };
+  }
+
+  async buildCreateBankTx(params: CreateBankParams): Promise<UnsignedTxLike> {
+    const userUtxos = await this.wallet.getUtxos();
+    const changeAddress = await this.wallet.getChangeAddress();
+    const currentHeight = await fetchCurrentHeight();
+    const bankTree = compileBankContract(params.bankNft, params.wergTokenId);
+    const outputValue = params.initialErgReserve < MIN_BOX_VALUE ? MIN_BOX_VALUE : params.initialErgReserve;
+
+    const bankOutput = buildBankOutput(
+      bankTree,
+      params.bankNft,
+      params.wergTokenId,
+      outputValue,
+      params.initialWergReserve
+    );
+
+    return new TransactionBuilder(currentHeight)
+      .from(userUtxos)
+      .to(bankOutput)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+  }
+
+  async createBank(params: CreateBankParams): Promise<string> {
+    const unsignedTx = await this.buildCreateBankTx(params);
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return submitTx(signedTx);
+  }
+
+  async buildWrapTx(params: WrapParams): Promise<UnsignedTxLike> {
+    const bankNft = params.bankNft ?? this.bankNFT;
+    const wergTokenId = params.wergTokenId ?? this.wergTokenId;
+    const bankTree = compileBankContract(bankNft, wergTokenId);
+    const bankBox = await this.fetchBankBox(bankNft);
+    const userUtxos = await this.wallet.getUtxos();
+    const changeAddress = await this.wallet.getChangeAddress();
+    const currentHeight = await fetchCurrentHeight();
+
+    const currentWergAmount = BigInt(bankBox.assets.find((t: any) => t.tokenId === wergTokenId)?.amount ?? 0);
+    const currentErgAmount = BigInt(bankBox.value);
+
+    if (currentWergAmount < params.amountNanoErg) {
+      throw new Error(`Insufficient WERG in bank. Available: ${currentWergAmount}, Requested: ${params.amountNanoErg}`);
     }
 
-    /**
-     * Wrap ERG → WERG
-     * User sends ERG to the bank box and receives WERG tokens in return.
-     * 
-     * @param amountNanoErg Amount of nanoERG to wrap
-     * @returns Transaction ID
-     */
-    async wrap(amountNanoErg: bigint): Promise<string> {
-        const bankBox = await this.fetchBankBox();
-        const userUtxos = await this.wallet.getUtxos();
-        const changeAddress = await this.wallet.getChangeAddress();
-        const currentHeight = await fetchCurrentHeight();
+    const newBankBox = buildBankOutput(
+      bankTree,
+      bankNft,
+      wergTokenId,
+      currentErgAmount + params.amountNanoErg,
+      currentWergAmount - params.amountNanoErg
+    );
 
-        const currentWergAmount = BigInt(
-            bankBox.assets.find((t: any) => t.tokenId === this.wergTokenId)!.amount
-        );
-        const currentErgAmount = BigInt(bankBox.value);
+    return new TransactionBuilder(currentHeight)
+      .from([bankBox, ...userUtxos])
+      .to(newBankBox)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+  }
 
-        if (currentWergAmount < amountNanoErg) {
-            throw new Error(
-                `Insufficient WERG in bank. Available: ${currentWergAmount}, Requested: ${amountNanoErg}`
-            );
-        }
+  async wrap(amountNanoErg: bigint): Promise<string> {
+    const unsignedTx = await this.buildWrapTx({ amountNanoErg });
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return submitTx(signedTx);
+  }
 
-        // Build the new bank box output:
-        // ERG increases by amountNanoErg, WERG decreases by amountNanoErg
-        const newBankBox = new OutputBuilder(
-            currentErgAmount + amountNanoErg,
-            this.bankTree
-        )
-            .addTokens({ tokenId: this.bankNFT, amount: 1n })
-            .addTokens({ tokenId: this.wergTokenId, amount: currentWergAmount - amountNanoErg });
+  async buildUnwrapTx(params: UnwrapParams): Promise<UnsignedTxLike> {
+    const bankNft = params.bankNft ?? this.bankNFT;
+    const wergTokenId = params.wergTokenId ?? this.wergTokenId;
+    const bankTree = compileBankContract(bankNft, wergTokenId);
+    const bankBox = await this.fetchBankBox(bankNft);
+    const userUtxos = await this.wallet.getUtxos();
+    const changeAddress = await this.wallet.getChangeAddress();
+    const currentHeight = await fetchCurrentHeight();
 
-        const unsignedTx = new TransactionBuilder(currentHeight)
-            .from([bankBox, ...userUtxos])
-            .to(newBankBox)
-            .sendChangeTo(changeAddress)
-            .payMinFee()
-            .build()
-            .toEIP12Object();
+    const currentWergAmount = BigInt(bankBox.assets.find((t: any) => t.tokenId === wergTokenId)?.amount ?? 0);
+    const currentErgAmount = BigInt(bankBox.value);
 
-        const signedTx = await this.wallet.signTx(unsignedTx);
-        const txId = await submitTx(signedTx);
-        return txId;
+    if (currentErgAmount - params.amountWerg < SAFE_MIN_BOX_VALUE) {
+      throw new Error(`Insufficient ERG in bank. Available: ${currentErgAmount - SAFE_MIN_BOX_VALUE}, Requested: ${params.amountWerg}`);
     }
 
-    /**
-     * Unwrap WERG → ERG
-     * User sends WERG tokens to the bank box and receives ERG in return.
-     * 
-     * @param amountWerg Amount of WERG to unwrap (in smallest unit, same scale as nanoERG)
-     * @returns Transaction ID
-     */
-    async unwrap(amountWerg: bigint): Promise<string> {
-        const bankBox = await this.fetchBankBox();
-        const userUtxos = await this.wallet.getUtxos();
-        const changeAddress = await this.wallet.getChangeAddress();
-        const currentHeight = await fetchCurrentHeight();
+    const newBankBox = buildBankOutput(
+      bankTree,
+      bankNft,
+      wergTokenId,
+      currentErgAmount - params.amountWerg,
+      currentWergAmount + params.amountWerg
+    );
 
-        const currentWergAmount = BigInt(
-            bankBox.assets.find((t: any) => t.tokenId === this.wergTokenId)!.amount
-        );
-        const currentErgAmount = BigInt(bankBox.value);
+    return new TransactionBuilder(currentHeight)
+      .from([bankBox, ...userUtxos])
+      .to(newBankBox)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+  }
 
-        // Bank needs enough ERG to release (must keep minimum box value)
-        const minBankErg = SAFE_MIN_BOX_VALUE;
-        if (currentErgAmount - amountWerg < minBankErg) {
-            throw new Error(
-                `Insufficient ERG in bank. Available: ${currentErgAmount - minBankErg}, Requested: ${amountWerg}`
-            );
-        }
+  async unwrap(amountWerg: bigint): Promise<string> {
+    const unsignedTx = await this.buildUnwrapTx({ amountWerg });
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return submitTx(signedTx);
+  }
+}
 
-        // Build the new bank box output:
-        // ERG decreases by amountWerg, WERG increases by amountWerg
-        const newBankBox = new OutputBuilder(
-            currentErgAmount - amountWerg,
-            this.bankTree
-        )
-            .addTokens({ tokenId: this.bankNFT, amount: 1n })
-            .addTokens({ tokenId: this.wergTokenId, amount: currentWergAmount + amountWerg });
-
-        const unsignedTx = new TransactionBuilder(currentHeight)
-            .from([bankBox, ...userUtxos])
-            .to(newBankBox)
-            .sendChangeTo(changeAddress)
-            .payMinFee()
-            .build()
-            .toEIP12Object();
-
-        const signedTx = await this.wallet.signTx(unsignedTx);
-        const txId = await submitTx(signedTx);
-        return txId;
-    }
+export async function listWrappedErgBanks() {
+  return WrappedErgManager.listBanks();
 }
