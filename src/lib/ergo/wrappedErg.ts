@@ -60,6 +60,12 @@ export interface UnwrapParams {
 
 export type UnsignedTxLike = ReturnType<ReturnType<TransactionBuilder['build']>['toEIP12Object']>;
 
+/**
+ * A partially-configured TransactionBuilder ready for `.build().toEIP12Object()`.
+ * Callers can add extra outputs, change fees, etc. before finalizing.
+ */
+export type WrappedErgTxBuilder = TransactionBuilder;
+
 async function fetchJson(url: string) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`Request failed: ${url}`);
@@ -172,7 +178,12 @@ export class WrappedErgManager {
     };
   }
 
-  async buildCreateBankTx(params: CreateBankParams): Promise<UnsignedTxLike> {
+  // ---------------------------------------------------------------
+  // Builder methods — return TransactionBuilder for chaining
+  // Callers can .to(extraOutput).payFee(customFee).build().toEIP12Object()
+  // ---------------------------------------------------------------
+
+  async createBankBuilder(params: CreateBankParams): Promise<WrappedErgTxBuilder> {
     const userUtxos = await this.wallet.getUtxos();
     const changeAddress = await this.wallet.getChangeAddress();
     const currentHeight = await fetchCurrentHeight();
@@ -191,18 +202,10 @@ export class WrappedErgManager {
       .from(userUtxos)
       .to(bankOutput)
       .sendChangeTo(changeAddress)
-      .payFee(DEFAULT_FEE)
-      .build()
-      .toEIP12Object();
+      .payFee(DEFAULT_FEE);
   }
 
-  async createBank(params: CreateBankParams): Promise<string> {
-    const unsignedTx = await this.buildCreateBankTx(params);
-    const signedTx = await this.wallet.signTx(unsignedTx);
-    return submitTx(signedTx);
-  }
-
-  async buildWrapTx(params: WrapParams): Promise<UnsignedTxLike> {
+  async wrapBuilder(params: WrapParams): Promise<WrappedErgTxBuilder> {
     const bankNft = params.bankNft ?? this.bankNFT;
     const wergTokenId = params.wergTokenId ?? this.wergTokenId;
     const bankTree = compileBankContract(bankNft, wergTokenId);
@@ -230,18 +233,10 @@ export class WrappedErgManager {
       .from([bankBox, ...userUtxos])
       .to(newBankBox)
       .sendChangeTo(changeAddress)
-      .payFee(DEFAULT_FEE)
-      .build()
-      .toEIP12Object();
+      .payFee(DEFAULT_FEE);
   }
 
-  async wrap(amountNanoErg: bigint): Promise<string> {
-    const unsignedTx = await this.buildWrapTx({ amountNanoErg });
-    const signedTx = await this.wallet.signTx(unsignedTx);
-    return submitTx(signedTx);
-  }
-
-  async buildUnwrapTx(params: UnwrapParams): Promise<UnsignedTxLike> {
+  async unwrapBuilder(params: UnwrapParams): Promise<WrappedErgTxBuilder> {
     const bankNft = params.bankNft ?? this.bankNFT;
     const wergTokenId = params.wergTokenId ?? this.wergTokenId;
     const bankTree = compileBankContract(bankNft, wergTokenId);
@@ -269,9 +264,35 @@ export class WrappedErgManager {
       .from([bankBox, ...userUtxos])
       .to(newBankBox)
       .sendChangeTo(changeAddress)
-      .payFee(DEFAULT_FEE)
-      .build()
-      .toEIP12Object();
+      .payFee(DEFAULT_FEE);
+  }
+
+  // ---------------------------------------------------------------
+  // Convenience methods — build + sign + submit in one call
+  // ---------------------------------------------------------------
+
+  async buildCreateBankTx(params: CreateBankParams): Promise<UnsignedTxLike> {
+    return (await this.createBankBuilder(params)).build().toEIP12Object();
+  }
+
+  async createBank(params: CreateBankParams): Promise<string> {
+    const unsignedTx = await this.buildCreateBankTx(params);
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return submitTx(signedTx);
+  }
+
+  async buildWrapTx(params: WrapParams): Promise<UnsignedTxLike> {
+    return (await this.wrapBuilder(params)).build().toEIP12Object();
+  }
+
+  async wrap(amountNanoErg: bigint): Promise<string> {
+    const unsignedTx = await this.buildWrapTx({ amountNanoErg });
+    const signedTx = await this.wallet.signTx(unsignedTx);
+    return submitTx(signedTx);
+  }
+
+  async buildUnwrapTx(params: UnwrapParams): Promise<UnsignedTxLike> {
+    return (await this.unwrapBuilder(params)).build().toEIP12Object();
   }
 
   async unwrap(amountWerg: bigint): Promise<string> {

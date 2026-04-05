@@ -17,7 +17,8 @@ export type {
   CreateBankParams,
   WrapParams,
   UnwrapParams,
-  UnsignedTxLike
+  UnsignedTxLike,
+  WrappedErgTxBuilder
 } from './ergo/wrappedErg';
 
 // Environment config
