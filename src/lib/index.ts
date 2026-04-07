@@ -32,7 +32,8 @@ export {
   EXPLORER_URI_ADDR,
   NANOERG_PER_ERG,
   MIN_BOX_VALUE,
-  DEFAULT_FEE
+  DEFAULT_FEE,
+  WERG_DECIMALS
 } from './ergo/envs';
 
 // Stores

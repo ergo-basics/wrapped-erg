@@ -5,7 +5,8 @@ import {
   WERG_TOKEN_ID,
   EXPLORER_API,
   DEFAULT_FEE,
-  MIN_BOX_VALUE
+  MIN_BOX_VALUE,
+  WERG_DECIMALS
 } from './envs';
 
 export interface WergState {
@@ -49,7 +50,7 @@ export interface CreateBankParams {
 export interface CreateBankWithMintParams {
   nftName: string;
   wergName: string;
-  wergSupply: bigint;
+  /** Initial ERG to lock in the bank (in nanoERG). WERG supply is always equal to this (1:1 peg). */
   initialErgReserve: bigint;
 }
 
@@ -194,6 +195,9 @@ export class WrappedErgManager {
     const changeAddress = await this.wallet.getChangeAddress();
     const currentHeight = await fetchCurrentHeight();
 
+    // WERG supply always equals initial ERG reserve (1:1 peg, both use 9 decimals)
+    const wergSupply = params.initialErgReserve;
+
     // STEP 1: Mint the Bank NFT (amount: 1)
     // Token ID will be the first input's box ID
     const nftMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
@@ -231,10 +235,12 @@ export class WrappedErgManager {
     const allInputs = nftBox ? [nftBox, ...otherUtxos] : freshUtxos;
 
     // Mint WERG token — its ID will be the first input's box ID of this TX
+    // 9 decimals to match ERG (1 WERG = 1_000_000_000 smallest units = 1 ERG)
     const wergMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
       .mintToken({
-        amount: params.wergSupply,
-        name: params.wergName
+        amount: wergSupply,
+        name: params.wergName,
+        decimals: WERG_DECIMALS
       });
 
     const mintWergTx = new TransactionBuilder(freshHeight)
@@ -258,7 +264,7 @@ export class WrappedErgManager {
     const bankTree = compileBankContract(bankNftId, wergTokenId);
     const outputValue = params.initialErgReserve < MIN_BOX_VALUE ? MIN_BOX_VALUE : params.initialErgReserve;
 
-    const bankOutput = buildBankOutput(bankTree, bankNftId, wergTokenId, outputValue, params.wergSupply);
+    const bankOutput = buildBankOutput(bankTree, bankNftId, wergTokenId, outputValue, wergSupply);
 
     const createBankTx = new TransactionBuilder(bankHeight)
       .from(bankUtxos)
