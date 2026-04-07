@@ -1,5 +1,7 @@
 <script lang="ts">
     import '../app.css';
+    import { onMount } from 'svelte';
+    import { WalletButton, WalletModal, walletConnected, walletAddress } from 'wallet-svelte-component';
     import { connected, address } from '$lib/ergo/store';
 
     let darkMode = true;
@@ -13,20 +15,21 @@
         }
     }
 
-    // Set dark mode by default
-    import { onMount } from 'svelte';
     onMount(() => {
         document.documentElement.classList.add('dark');
     });
+
+    // Sync wallet-svelte-component stores to our local stores
+    $: $connected = $walletConnected;
+    $: $address = $walletAddress;
 </script>
 
 <div class="min-h-screen bg-background text-foreground">
-    <!-- Header -->
     <header class="border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div class="container flex h-16 items-center justify-between px-4 mx-auto max-w-5xl">
             <div class="flex items-center gap-3">
                 <div class="flex items-center gap-2">
-                    <span class="text-2xl">🔄</span>
+                    <img src="/favicon.svg" alt="Wrapped ERG" class="h-7 w-7" />
                     <h1 class="text-xl font-bold tracking-tight">
                         Wrapped <span class="text-primary">ERG</span>
                     </h1>
@@ -37,12 +40,7 @@
             </div>
 
             <div class="flex items-center gap-3">
-                {#if $connected && $address}
-                    <span class="text-xs text-muted-foreground font-mono hidden sm:inline-block">
-                        {$address.slice(0, 8)}...{$address.slice(-4)}
-                    </span>
-                    <div class="h-2 w-2 rounded-full bg-green-500 animate-pulse" title="Connected"></div>
-                {/if}
+                <WalletButton />
                 <button
                     on:click={toggleTheme}
                     class="inline-flex items-center justify-center rounded-md text-sm font-medium h-9 w-9 border border-border hover:bg-secondary transition-colors"
@@ -54,12 +52,12 @@
         </div>
     </header>
 
-    <!-- Main Content -->
+    <WalletModal />
+
     <main class="container mx-auto max-w-5xl px-4 py-8">
         <slot />
     </main>
 
-    <!-- Footer -->
     <footer class="border-t border-border/40 py-6 text-center text-xs text-muted-foreground">
         <div class="container mx-auto max-w-5xl px-4">
             <p>Wrapped ERG — 1:1 ERG ↔ WERG Exchange on Ergo Blockchain</p>

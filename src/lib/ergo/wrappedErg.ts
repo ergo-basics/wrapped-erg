@@ -46,6 +46,13 @@ export interface CreateBankParams {
   initialWergReserve: bigint;
 }
 
+export interface CreateBankWithMintParams {
+  nftName: string;
+  wergName: string;
+  wergSupply: bigint;
+  initialErgReserve: bigint;
+}
+
 export interface WrapParams {
   amountNanoErg: bigint;
   bankNft?: string;
@@ -176,6 +183,93 @@ export class WrappedErgManager {
       wergReserve: BigInt(wergToken.amount),
       ergoTree: bankBox.ergoTree
     };
+  }
+
+  // ---------------------------------------------------------------
+  // Auto-mint bank creation (two-step: mint NFT, then mint WERG + create bank)
+  // ---------------------------------------------------------------
+
+  async createBankWithMint(params: CreateBankWithMintParams): Promise<string> {
+    const userUtxos = await this.wallet.getUtxos();
+    const changeAddress = await this.wallet.getChangeAddress();
+    const currentHeight = await fetchCurrentHeight();
+
+    // STEP 1: Mint the Bank NFT (amount: 1)
+    // Token ID will be the first input's box ID
+    const nftMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
+      .mintToken({
+        amount: 1n,
+        name: params.nftName
+      });
+
+    const mintNftTx = new TransactionBuilder(currentHeight)
+      .from(userUtxos)
+      .to(nftMintOutput)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+
+    const signedNftTx = await this.wallet.signTx(mintNftTx);
+    const nftTxId = await submitTx(signedNftTx);
+
+    // The minted NFT token ID = first input's box ID
+    const bankNftId = mintNftTx.inputs[0].boxId;
+
+    // Wait a moment for the TX to propagate, then fetch the new UTxOs
+    await new Promise(r => setTimeout(r, 2000));
+
+    // STEP 2: Mint WERG tokens and create the bank box
+    const freshUtxos = await this.wallet.getUtxos();
+    const freshHeight = await fetchCurrentHeight();
+
+    // Find the box containing the freshly minted NFT
+    const nftBox = freshUtxos.find((u: any) =>
+      u.assets?.some((a: any) => a.tokenId === bankNftId)
+    );
+    const otherUtxos = freshUtxos.filter((u: any) => u !== nftBox);
+    const allInputs = nftBox ? [nftBox, ...otherUtxos] : freshUtxos;
+
+    // Mint WERG token — its ID will be the first input's box ID of this TX
+    const wergMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
+      .mintToken({
+        amount: params.wergSupply,
+        name: params.wergName
+      });
+
+    const mintWergTx = new TransactionBuilder(freshHeight)
+      .from(allInputs)
+      .to(wergMintOutput)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+
+    const signedWergTx = await this.wallet.signTx(mintWergTx);
+    const wergTxId = await submitTx(signedWergTx);
+    const wergTokenId = mintWergTx.inputs[0].boxId;
+
+    // Wait for WERG mint TX to propagate
+    await new Promise(r => setTimeout(r, 2000));
+
+    // STEP 3: Create the bank box with both tokens
+    const bankUtxos = await this.wallet.getUtxos();
+    const bankHeight = await fetchCurrentHeight();
+    const bankTree = compileBankContract(bankNftId, wergTokenId);
+    const outputValue = params.initialErgReserve < MIN_BOX_VALUE ? MIN_BOX_VALUE : params.initialErgReserve;
+
+    const bankOutput = buildBankOutput(bankTree, bankNftId, wergTokenId, outputValue, params.wergSupply);
+
+    const createBankTx = new TransactionBuilder(bankHeight)
+      .from(bankUtxos)
+      .to(bankOutput)
+      .sendChangeTo(changeAddress)
+      .payFee(DEFAULT_FEE)
+      .build()
+      .toEIP12Object();
+
+    const signedBankTx = await this.wallet.signTx(createBankTx);
+    return submitTx(signedBankTx);
   }
 
   // ---------------------------------------------------------------

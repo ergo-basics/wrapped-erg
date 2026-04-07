@@ -15,6 +15,7 @@ export type {
   ExplorerAsset,
   WrappedErgBankSummary,
   CreateBankParams,
+  CreateBankWithMintParams,
   WrapParams,
   UnwrapParams,
   UnsignedTxLike,

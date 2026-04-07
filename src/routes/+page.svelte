@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { getUtxos } from 'wallet-svelte-component';
     import {
         connected,
         address,
@@ -28,10 +29,10 @@
     let selectedBankNft = '';
     let selectedWergTokenId = '';
 
-    let newBankNft = '';
-    let newWergTokenId = '';
-    let newBankErg = '0.001';
-    let newBankWerg = '0';
+    let newBankErg = '1';
+    let newBankWergSupply = '1000000';
+    let newBankNftName = 'WERG Bank';
+    let newBankWergName = 'WERG';
 
     onMount(async () => {
         await refreshBanks();
@@ -41,13 +42,25 @@
         initManager();
     }
 
+    function getWalletContext() {
+        const w = window as any;
+        return {
+            getUtxos: () => getUtxos(),
+            getChangeAddress: async () => {
+                return await w.ergo.get_change_address();
+            },
+            signTx: async (tx: any) => {
+                return await w.ergo.sign_tx(tx);
+            }
+        };
+    }
+
     async function initManager() {
         if (typeof window === 'undefined') return;
         try {
-            const w: any = window;
-            const ergoWallet = w.ergoConnector?.nautilus;
-            if (!ergoWallet) return;
-            const ctx = await ergoWallet.getContext();
+            const w = window as any;
+            if (!w.ergo) return;
+            const ctx = getWalletContext();
             manager = new WrappedErgManager(ctx, selectedBankNft || undefined, selectedWergTokenId || undefined);
             await refreshBankState();
         } catch (e) {
@@ -144,24 +157,22 @@
         $txPending = true;
         $txError = null;
         try {
-            const txId = await manager.createBank({
-                bankNft: newBankNft.trim(),
-                wergTokenId: newWergTokenId.trim(),
-                initialErgReserve: parseErgToNano(newBankErg),
-                initialWergReserve: parseErgToNano(newBankWerg)
+            const txId = await manager.createBankWithMint({
+                nftName: newBankNftName.trim(),
+                wergName: newBankWergName.trim(),
+                wergSupply: BigInt(newBankWergSupply),
+                initialErgReserve: parseErgToNano(newBankErg)
             });
             const record: TxRecord = {
                 txId,
                 type: 'wrap',
-                amount: `create:${newBankErg}/${newBankWerg}`,
+                amount: `new bank: ${newBankErg} ERG, ${newBankWergSupply} WERG`,
                 timestamp: Date.now(),
                 status: 'pending'
             };
             $txHistory = [record, ...$txHistory].slice(0, 20);
-            newBankNft = '';
-            newWergTokenId = '';
-            newBankErg = '0.001';
-            newBankWerg = '0';
+            newBankErg = '1';
+            newBankWergSupply = '1000000';
             await refreshBanks();
         } catch (e: any) {
             $txError = e.message || 'Create bank transaction failed';
@@ -177,33 +188,10 @@
     function truncateTxId(txId: string): string {
         return txId.slice(0, 10) + '...' + txId.slice(-6);
     }
-
-    async function connectWallet() {
-        if (typeof window === 'undefined') return;
-        try {
-            const w = window as any;
-            const nautilus = w.ergoConnector?.nautilus;
-            if (!nautilus) {
-                alert('Please install the Nautilus wallet extension');
-                return;
-            }
-            const granted = await nautilus.connect();
-            if (granted) {
-                $connected = true;
-                const ctx = await nautilus.getContext();
-                const addr = await ctx.get_change_address();
-                $address = addr;
-                manager = new WrappedErgManager(ctx, selectedBankNft || undefined, selectedWergTokenId || undefined);
-                await refreshBankState();
-            }
-        } catch (e) {
-            console.error('Connection failed:', e);
-        }
-    }
 </script>
 
 <svelte:head>
-    <title>Wrapped ERG — Banks + Library API</title>
+    <title>Wrapped ERG</title>
     <meta name="description" content="Create, list, wrap and unwrap Wrapped ERG banks on Ergo." />
 </svelte:head>
 
@@ -211,14 +199,8 @@
     <div class="text-center space-y-4 py-4">
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">Wrapped ERG</h2>
         <p class="text-muted-foreground max-w-2xl mx-auto">
-            Supports bank discovery, bank creation, and builder-friendly wrap/unwrap flows for downstream app integration.
+            Bank discovery, creation, and builder-friendly wrap/unwrap flows for downstream app integration.
         </p>
-    </div>
-
-    <div class="flex justify-center">
-        <button class="px-6 py-3 rounded-lg bg-primary text-primary-foreground font-medium" on:click={connectWallet}>
-            {$connected ? '✓ Connected' : '🔗 Connect Nautilus Wallet'}
-        </button>
     </div>
 
     <div class="rounded-xl border border-border/50 bg-card p-5 space-y-4">
@@ -246,20 +228,20 @@
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div class="rounded-xl border border-border/50 p-5 bg-card">
             <div class="text-sm text-muted-foreground mb-1">ERG Reserve</div>
-            <div class="text-2xl font-bold font-mono">{#if $bankLoading}<span class="animate-pulse">···</span>{:else}{$ergReserveDisplay}{/if}</div>
+            <div class="text-2xl font-bold font-mono">{#if $bankLoading}<span class="animate-pulse">...</span>{:else}{$ergReserveDisplay}{/if}</div>
         </div>
         <div class="rounded-xl border border-border/50 p-5 bg-card">
             <div class="text-sm text-muted-foreground mb-1">WERG Reserve</div>
-            <div class="text-2xl font-bold font-mono">{#if $bankLoading}<span class="animate-pulse">···</span>{:else}{$wergReserveDisplay}{/if}</div>
+            <div class="text-2xl font-bold font-mono">{#if $bankLoading}<span class="animate-pulse">...</span>{:else}{$wergReserveDisplay}{/if}</div>
         </div>
         <div class="rounded-xl border border-border/50 p-5 bg-card">
             <div class="text-sm text-muted-foreground mb-1">Selected Bank</div>
-            <div class="text-sm font-mono break-all">{selectedBankNft || '—'}</div>
+            <div class="text-sm font-mono break-all">{selectedBankNft || '---'}</div>
         </div>
     </div>
 
     {#if $bankError}
-        <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">⚠️ {$bankError}</div>
+        <div class="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">{$bankError}</div>
     {/if}
 
     {#if $connected}
@@ -283,16 +265,17 @@
                     </div>
                 {:else}
                     <div class="space-y-4">
-                        <input bind:value={newBankNft} placeholder="Bank NFT token id" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <input bind:value={newWergTokenId} placeholder="WERG token id" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                        <p class="text-sm text-muted-foreground">Creates a new bank by minting a Bank NFT and WERG tokens automatically.</p>
+                        <input bind:value={newBankNftName} placeholder="Bank NFT name" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                        <input bind:value={newBankWergName} placeholder="WERG token name" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
                         <input bind:value={newBankErg} placeholder="Initial ERG reserve" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <input bind:value={newBankWerg} placeholder="Initial WERG reserve" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <button on:click={handleCreateBank} disabled={$txPending || !newBankNft || !newWergTokenId} class="w-full py-3 rounded-lg bg-primary text-primary-foreground">{$txPending ? 'Processing...' : 'Create Bank'}</button>
+                        <input bind:value={newBankWergSupply} placeholder="WERG total supply" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                        <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground">{$txPending ? 'Processing...' : 'Create Bank'}</button>
                     </div>
                 {/if}
 
                 {#if $txError}
-                    <div class="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">❌ {$txError}</div>
+                    <div class="mt-4 rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">{$txError}</div>
                 {/if}
             </div>
         </div>
@@ -305,10 +288,10 @@
                 {#each $txHistory as tx}
                     <div class="px-5 py-3 flex items-center justify-between text-sm">
                         <div>
-                            <div class="font-medium">{tx.type} — {tx.amount}</div>
+                            <div class="font-medium">{tx.type} --- {tx.amount}</div>
                             <div class="text-xs text-muted-foreground">{formatTimestamp(tx.timestamp)}</div>
                         </div>
-                        <a href="{EXPLORER_URI_TX}{tx.txId}" target="_blank" rel="noopener" class="font-mono text-xs text-primary hover:underline">{truncateTxId(tx.txId)} ↗</a>
+                        <a href="{EXPLORER_URI_TX}{tx.txId}" target="_blank" rel="noopener" class="font-mono text-xs text-primary hover:underline">{truncateTxId(tx.txId)}</a>
                     </div>
                 {/each}
             </div>
