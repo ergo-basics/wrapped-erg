@@ -6,7 +6,8 @@ import {
   EXPLORER_API,
   DEFAULT_FEE,
   MIN_BOX_VALUE,
-  WERG_DECIMALS
+  WERG_DECIMALS,
+  WERG_TOTAL_SUPPLY
 } from './envs';
 
 export interface WergState {
@@ -195,8 +196,9 @@ export class WrappedErgManager {
     const changeAddress = await this.wallet.getChangeAddress();
     const currentHeight = await fetchCurrentHeight();
 
-    // WERG supply always equals initial ERG reserve (1:1 peg, both use 9 decimals)
-    const wergSupply = params.initialErgReserve;
+    // WERG total supply = total ERG supply (97,739,925 ERG in nanoERG units)
+    // The full supply is minted and placed in the bank. Users swap ERG for WERG 1:1.
+    const wergSupply = WERG_TOTAL_SUPPLY;
 
     // STEP 1: Mint the Bank NFT (amount: 1)
     // Token ID will be the first input's box ID

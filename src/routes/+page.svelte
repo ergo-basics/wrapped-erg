@@ -279,8 +279,8 @@
                             <p class="text-xs text-muted-foreground mt-1">Amount of ERG to lock in the bank. Supports up to 9 decimal places (1 ERG = 1,000,000,000 nanoERG).</p>
                         </div>
                         <div class="rounded-lg bg-secondary/50 border border-border/50 p-3">
-                            <p class="text-sm font-medium">WERG Supply: <span class="text-primary font-mono">{newBankErg || '0'} WERG</span></p>
-                            <p class="text-xs text-muted-foreground mt-1">WERG total supply always equals ERG reserve (1:1 peg, 9 decimals). This is enforced automatically.</p>
+                            <p class="text-sm font-medium">WERG Total Supply: <span class="text-primary font-mono">97,739,925 WERG</span></p>
+                            <p class="text-xs text-muted-foreground mt-1">Fixed to match the total ERG supply (97,739,925 ERG). 9 decimals, 1:1 peg. The full supply is minted and placed in the bank.</p>
                         </div>
                         <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground font-medium">{$txPending ? 'Processing...' : 'Create Bank'}</button>
                     </div>

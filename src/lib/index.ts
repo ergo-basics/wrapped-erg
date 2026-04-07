@@ -33,7 +33,9 @@ export {
   NANOERG_PER_ERG,
   MIN_BOX_VALUE,
   DEFAULT_FEE,
-  WERG_DECIMALS
+  WERG_DECIMALS,
+  ERG_TOTAL_SUPPLY,
+  WERG_TOTAL_SUPPLY
 } from './ergo/envs';
 
 // Stores

@@ -50,3 +50,9 @@ export const DEFAULT_FEE = 1_100_000n;
 
 /** WERG token decimals — matches ERG (9) so 1 WERG = 1 ERG at smallest unit */
 export const WERG_DECIMALS = 9;
+
+/** Total ERG supply (hard cap): 97,739,925 ERG */
+export const ERG_TOTAL_SUPPLY = 97_739_925n;
+
+/** WERG total supply in nanoERG units — always matches total ERG supply (1:1 peg) */
+export const WERG_TOTAL_SUPPLY = ERG_TOTAL_SUPPLY * NANOERG_PER_ERG;
