@@ -14,7 +14,7 @@
         wergReserveDisplay,
         parseErgToNano
     } from '$lib/ergo/store';
-    import { WrappedErgManager, listWrappedErgBanks, type WrappedErgBankSummary } from '$lib/ergo/wrappedErg';
+    import { WrappedErgManager, listWrappedErgBanks, fetchCurrentErgSupply, type WrappedErgBankSummary } from '$lib/ergo/wrappedErg';
     import type { TxRecord } from '$lib/ergo/store';
     import { EXPLORER_URI_TX } from '$lib/ergo/envs';
 
@@ -32,9 +32,14 @@
     let newBankErg = '1';
     let newBankNftName = 'WERG Bank';
     let newBankWergName = 'WERG';
+    let currentErgSupply: string = '...';
 
     onMount(async () => {
         await refreshBanks();
+        try {
+            const supply = await fetchCurrentErgSupply();
+            currentErgSupply = supply.toLocaleString();
+        } catch { currentErgSupply = '~94,855,485'; }
     });
 
     $: if ($connected && typeof window !== 'undefined') {
@@ -279,8 +284,8 @@
                             <p class="text-xs text-muted-foreground mt-1">Amount of ERG to lock in the bank. Supports up to 9 decimal places (1 ERG = 1,000,000,000 nanoERG).</p>
                         </div>
                         <div class="rounded-lg bg-secondary/50 border border-border/50 p-3">
-                            <p class="text-sm font-medium">WERG Total Supply: <span class="text-primary font-mono">97,739,925 WERG</span></p>
-                            <p class="text-xs text-muted-foreground mt-1">Fixed to match the total ERG supply (97,739,925 ERG). 9 decimals, 1:1 peg. The full supply is minted and placed in the bank.</p>
+                            <p class="text-sm font-medium">WERG Total Supply: <span class="text-primary font-mono">{currentErgSupply} WERG</span></p>
+                            <p class="text-xs text-muted-foreground mt-1">Matches the current ERG circulating supply ({currentErgSupply} ERG). 9 decimals, 1:1 peg. The full supply is minted and placed in the bank.</p>
                         </div>
                         <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground font-medium">{$txPending ? 'Processing...' : 'Create Bank'}</button>
                     </div>
