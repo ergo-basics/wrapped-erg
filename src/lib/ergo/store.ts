@@ -91,8 +91,8 @@ export function formatErg(nanoErg: bigint): string {
     return `${whole}.${fracStr}`;
 }
 
-export function parseErgToNano(ergStr: string): bigint {
-    const parts = ergStr.split('.');
+export function parseErgToNano(ergStr: string | number): bigint {
+    const parts = String(ergStr).split('.');
     const whole = BigInt(parts[0] || '0');
     let fracStr = (parts[1] || '').padEnd(9, '0').slice(0, 9);
     const frac = BigInt(fracStr);
