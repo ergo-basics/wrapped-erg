@@ -6,7 +6,9 @@ export { default as wrapped_erg_bank_contract } from './contracts/wrapped_erg_ba
 // Core manager + helpers
 export {
   WrappedErgManager,
-  listWrappedErgBanks
+  listWrappedErgBanks,
+  fetchCurrentErgSupply,
+  fetchCurrentErgSupplyNano
 } from './ergo/wrappedErg';
 
 export type {
@@ -32,7 +34,10 @@ export {
   EXPLORER_URI_ADDR,
   NANOERG_PER_ERG,
   MIN_BOX_VALUE,
-  DEFAULT_FEE
+  DEFAULT_FEE,
+  WERG_DECIMALS,
+  ERG_MAX_SUPPLY,
+  ERG_MAX_SUPPLY_NANO
 } from './ergo/envs';
 
 // Stores

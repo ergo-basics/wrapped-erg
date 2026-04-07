@@ -5,7 +5,10 @@ import {
   WERG_TOKEN_ID,
   EXPLORER_API,
   DEFAULT_FEE,
-  MIN_BOX_VALUE
+  MIN_BOX_VALUE,
+  WERG_DECIMALS,
+  ERG_MAX_SUPPLY_NANO,
+  NANOERG_PER_ERG
 } from './envs';
 
 export interface WergState {
@@ -49,7 +52,7 @@ export interface CreateBankParams {
 export interface CreateBankWithMintParams {
   nftName: string;
   wergName: string;
-  wergSupply: bigint;
+  /** Initial ERG to lock in the bank (in nanoERG). WERG supply is always equal to this (1:1 peg). */
   initialErgReserve: bigint;
 }
 
@@ -82,6 +85,37 @@ async function fetchJson(url: string) {
 async function fetchCurrentHeight(): Promise<number> {
   const data = await fetchJson(`${EXPLORER_API}/blocks?limit=1&offset=0&sortBy=height&sortDirection=desc`);
   return data.items[0].height;
+}
+
+/**
+ * Calculate current ERG circulating supply from block height.
+ * Ergo emission: 75 ERG/block for first 525,600 blocks,
+ * then decreases by 3 ERG every 64,800 blocks until 0.
+ * Returns supply in nanoERG.
+ */
+function calcCirculatingSupplyNano(height: number): bigint {
+  const FIRST_REDUCTION = 525600;
+  const REDUCTION_INTERVAL = 64800;
+  let total = 0n;
+  let rate = 75n;
+
+  if (height <= FIRST_REDUCTION) {
+    return BigInt(height) * rate * NANOERG_PER_ERG;
+  }
+
+  total = BigInt(FIRST_REDUCTION) * rate * NANOERG_PER_ERG;
+  let block = FIRST_REDUCTION + 1;
+  rate = 72n;
+
+  while (block <= height && rate > 0n) {
+    const end = Math.min(block + REDUCTION_INTERVAL - 1, height);
+    const blocksInPeriod = BigInt(end - block + 1);
+    total += blocksInPeriod * rate * NANOERG_PER_ERG;
+    block = end + 1;
+    rate -= 3n;
+  }
+
+  return total;
 }
 
 async function fetchUnspentBoxesByTokenId(tokenId: string): Promise<ExplorerBox[]> {
@@ -194,6 +228,10 @@ export class WrappedErgManager {
     const changeAddress = await this.wallet.getChangeAddress();
     const currentHeight = await fetchCurrentHeight();
 
+    // WERG total supply = full ERG max supply (97,739,925 ERG)
+    // Mint the entire max supply so no re-minting is ever needed.
+    const wergSupply = ERG_MAX_SUPPLY_NANO;
+
     // STEP 1: Mint the Bank NFT (amount: 1)
     // Token ID will be the first input's box ID
     const nftMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
@@ -231,10 +269,12 @@ export class WrappedErgManager {
     const allInputs = nftBox ? [nftBox, ...otherUtxos] : freshUtxos;
 
     // Mint WERG token — its ID will be the first input's box ID of this TX
+    // 9 decimals to match ERG (1 WERG = 1_000_000_000 smallest units = 1 ERG)
     const wergMintOutput = new OutputBuilder(MIN_BOX_VALUE, changeAddress)
       .mintToken({
-        amount: params.wergSupply,
-        name: params.wergName
+        amount: wergSupply,
+        name: params.wergName,
+        decimals: WERG_DECIMALS
       });
 
     const mintWergTx = new TransactionBuilder(freshHeight)
@@ -258,7 +298,7 @@ export class WrappedErgManager {
     const bankTree = compileBankContract(bankNftId, wergTokenId);
     const outputValue = params.initialErgReserve < MIN_BOX_VALUE ? MIN_BOX_VALUE : params.initialErgReserve;
 
-    const bankOutput = buildBankOutput(bankTree, bankNftId, wergTokenId, outputValue, params.wergSupply);
+    const bankOutput = buildBankOutput(bankTree, bankNftId, wergTokenId, outputValue, wergSupply);
 
     const createBankTx = new TransactionBuilder(bankHeight)
       .from(bankUtxos)
@@ -398,4 +438,16 @@ export class WrappedErgManager {
 
 export async function listWrappedErgBanks() {
   return WrappedErgManager.listBanks();
+}
+
+/** Fetch the current ERG circulating supply in nanoERG (derived from block height). */
+export async function fetchCurrentErgSupplyNano(): Promise<bigint> {
+  const height = await fetchCurrentHeight();
+  return calcCirculatingSupplyNano(height);
+}
+
+/** Fetch the current ERG circulating supply in whole ERG. */
+export async function fetchCurrentErgSupply(): Promise<bigint> {
+  const nano = await fetchCurrentErgSupplyNano();
+  return nano / NANOERG_PER_ERG;
 }

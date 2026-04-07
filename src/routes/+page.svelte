@@ -30,9 +30,9 @@
     let selectedWergTokenId = '';
 
     let newBankErg = '1';
-    let newBankWergSupply = '1000000';
     let newBankNftName = 'WERG Bank';
     let newBankWergName = 'WERG';
+    const ERG_MAX_SUPPLY_DISPLAY = '97,739,925';
 
     onMount(async () => {
         await refreshBanks();
@@ -160,19 +160,17 @@
             const txId = await manager.createBankWithMint({
                 nftName: newBankNftName.trim(),
                 wergName: newBankWergName.trim(),
-                wergSupply: BigInt(newBankWergSupply),
                 initialErgReserve: parseErgToNano(newBankErg)
             });
             const record: TxRecord = {
                 txId,
                 type: 'wrap',
-                amount: `new bank: ${newBankErg} ERG, ${newBankWergSupply} WERG`,
+                amount: `new bank: ${newBankErg} ERG (1:1 WERG)`,
                 timestamp: Date.now(),
                 status: 'pending'
             };
             $txHistory = [record, ...$txHistory].slice(0, 20);
             newBankErg = '1';
-            newBankWergSupply = '1000000';
             await refreshBanks();
         } catch (e: any) {
             $txError = e.message || 'Create bank transaction failed';
@@ -264,13 +262,28 @@
                         <button on:click={handleUnwrap} disabled={$txPending || !unwrapAmount} class="w-full py-3 rounded-lg bg-primary text-primary-foreground">{$txPending ? 'Processing...' : 'Unwrap WERG'}</button>
                     </div>
                 {:else}
-                    <div class="space-y-4">
-                        <p class="text-sm text-muted-foreground">Creates a new bank by minting a Bank NFT and WERG tokens automatically.</p>
-                        <input bind:value={newBankNftName} placeholder="Bank NFT name" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <input bind:value={newBankWergName} placeholder="WERG token name" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <input bind:value={newBankErg} placeholder="Initial ERG reserve" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <input bind:value={newBankWergSupply} placeholder="WERG total supply" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                        <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground">{$txPending ? 'Processing...' : 'Create Bank'}</button>
+                    <div class="space-y-5">
+                        <p class="text-sm text-muted-foreground">Creates a new bank by minting a Bank NFT and WERG tokens automatically. Three transactions will be signed: mint NFT, mint WERG, create bank box.</p>
+                        <div>
+                            <label for="nft-name" class="block text-sm font-medium mb-1">Bank NFT Name</label>
+                            <input id="nft-name" bind:value={newBankNftName} placeholder="e.g. WERG Bank" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                            <p class="text-xs text-muted-foreground mt-1">Display name for the NFT that identifies this bank (singleton token).</p>
+                        </div>
+                        <div>
+                            <label for="werg-name" class="block text-sm font-medium mb-1">WERG Token Name</label>
+                            <input id="werg-name" bind:value={newBankWergName} placeholder="e.g. WERG" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                            <p class="text-xs text-muted-foreground mt-1">Display name for the wrapped ERG token that users will trade.</p>
+                        </div>
+                        <div>
+                            <label for="erg-reserve" class="block text-sm font-medium mb-1">Initial ERG Reserve</label>
+                            <input id="erg-reserve" bind:value={newBankErg} type="number" min="0.001" step="0.001" placeholder="e.g. 1" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
+                            <p class="text-xs text-muted-foreground mt-1">Amount of ERG to lock in the bank. Supports up to 9 decimal places (1 ERG = 1,000,000,000 nanoERG).</p>
+                        </div>
+                        <div class="rounded-lg bg-secondary/50 border border-border/50 p-3">
+                            <p class="text-sm font-medium">WERG Total Supply: <span class="text-primary font-mono">{ERG_MAX_SUPPLY_DISPLAY} WERG</span></p>
+                            <p class="text-xs text-muted-foreground mt-1">Matches the full ERG max supply ({ERG_MAX_SUPPLY_DISPLAY} ERG). 9 decimals, 1:1 peg. The entire supply is minted upfront so no re-minting is ever needed.</p>
+                        </div>
+                        <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground font-medium">{$txPending ? 'Processing...' : 'Create Bank'}</button>
                     </div>
                 {/if}
 
