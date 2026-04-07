@@ -1,210 +1,158 @@
-# wrapped-erg
-Wrapped Erg token contract + app + reusable library API
+# Wrapped ERG
 
-Based on https://github.com/ergo-basics/template
+1:1 ERG-to-WERG exchange on the Ergo blockchain. This repo is both a **web app** and a **reusable TypeScript library**.
 
-## Current scope
+Based on [ergo-basics/template](https://github.com/ergo-basics/template).
 
-This repo now targets three use cases:
+## What it does
 
-- wrapped ERG web app
-- bank discovery + bank creation UX
-- reusable `index.ts` library exports for other Ergo apps
+A "bank box" on Ergo holds ERG and WERG tokens behind a smart contract that enforces a simple invariant:
 
-### Library-first additions
+```
+ERG_in + WERG_in == ERG_out + WERG_out
+```
 
-The public API now includes:
+Deposit ERG, receive the same amount of WERG. Return WERG, get your ERG back. The bank NFT makes each bank a singleton — only one unspent box per bank exists at any time.
 
-- `WrappedErgManager`
-- `listWrappedErgBanks()`
-- `buildCreateBankTx(...)`
-- `buildWrapTx(...)`
-- `buildUnwrapTx(...)`
+## Web App
 
-Those `build*` methods return unsigned tx objects so downstream apps can support chained transaction flows.
+The SvelteKit app provides:
 
-See `LIBRARY.md` for usage.
+- **Bank discovery** — lists all deployed WERG banks on-chain
+- **Wrap / Unwrap** — exchange ERG for WERG and back
+- **Create Bank** — auto-mints a Bank NFT + WERG token and deploys a new bank box (3-step transaction flow)
+- **Wallet integration** — connects via [wallet-svelte-component](https://github.com/ergo-basics/wallet-svelte-component) (Nautilus, SAFEW)
 
+### Run locally
 
-### 1. El Contrato Inteligente (ErgoScript)
+```bash
+npm install
+npm run dev
+```
 
-Este script controla la "Caja Banco". Su única regla es matemática: **El total de ERG + WERG en la caja debe ser exactamente igual antes y después de cualquier transacción.** Esto garantiza matemáticamente el respaldo 1:1.
+### Deploy to GitHub Pages
+
+```bash
+npm run deploy
+```
+
+## Library Usage
+
+Install from the repo or npm (once published):
+
+```bash
+npm install wrapped-erg
+```
+
+### Quick start
+
+```ts
+import { WrappedErgManager, listWrappedErgBanks } from 'wrapped-erg';
+
+// List all banks on-chain
+const banks = await listWrappedErgBanks();
+
+// Create a manager with your wallet context
+const manager = new WrappedErgManager(wallet, bankNftId, wergTokenId);
+
+// One-liner wrap (sign + submit)
+const txId = await manager.wrap(1_000_000_000n); // 1 ERG
+```
+
+### Builder pattern (for chained transactions)
+
+The `*Builder` methods return a `TransactionBuilder` so you can customize before signing:
+
+```ts
+// Get a builder, add extra outputs, change fee, then finalize
+const builder = await manager.wrapBuilder({ amountNanoErg: 1_000_000_000n });
+const unsignedTx = builder
+  .payFee(2_000_000n)
+  .build()
+  .toEIP12Object();
+
+// Sign with your own flow
+const signed = await wallet.signTx(unsignedTx);
+```
+
+Available builders: `wrapBuilder()`, `unwrapBuilder()`, `createBankBuilder()`.
+
+### Auto-mint bank creation
+
+Create a brand new bank without pre-existing tokens:
+
+```ts
+const txId = await manager.createBankWithMint({
+  nftName: 'My WERG Bank',
+  wergName: 'WERG',
+  wergSupply: 1_000_000n,
+  initialErgReserve: 1_000_000_000n // 1 ERG
+});
+```
+
+This executes 3 transactions: mint NFT, mint WERG token, create bank box.
+
+### Convenience methods
+
+```ts
+await manager.wrap(1_000_000_000n);
+await manager.unwrap(500_000_000n);
+await manager.createBank({ bankNft, wergTokenId, initialErgReserve, initialWergReserve });
+```
+
+### Exports
+
+```ts
+// Core
+import { WrappedErgManager, listWrappedErgBanks } from 'wrapped-erg';
+
+// Types
+import type {
+  WergState, ExplorerBox, WrappedErgBankSummary,
+  CreateBankParams, CreateBankWithMintParams,
+  WrapParams, UnwrapParams, UnsignedTxLike, WrappedErgTxBuilder
+} from 'wrapped-erg';
+
+// Contract source
+import { wrapped_erg_bank_contract } from 'wrapped-erg';
+
+// Config constants
+import {
+  BANK_NFT_ID, WERG_TOKEN_ID, EXPLORER_API,
+  NANOERG_PER_ERG, MIN_BOX_VALUE, DEFAULT_FEE
+} from 'wrapped-erg';
+
+// Svelte stores (for SvelteKit apps)
+import {
+  address, connected, bankState, bankLoading,
+  ergReserveDisplay, wergReserveDisplay, formatErg, parseErgToNano
+} from 'wrapped-erg';
+```
+
+## Smart Contract
+
+The ErgoScript bank contract:
 
 ```scala
-// Contrato: Wrapped ERG Bank
-// Constantes inyectadas al compilar:
-// _BankNFT: Coll[Byte] - ID del NFT que identifica la caja banco oficial
-// _WergID:  Coll[Byte] - ID del token WERG
-
 {
-    // 1. La caja de salida en la posición 0 debe ser la nueva Caja Banco (mismo script)
     val isBankOutput = OUTPUTS(0).propositionBytes == SELF.propositionBytes
-    
-    // 2. La caja debe mantener exactamente 2 tokens: [0] = BankNFT, [1] = WERG
     val exactTokens = OUTPUTS(0).tokens.size == 2
     val keepsNFT    = OUTPUTS(0).tokens(0)._1 == _BankNFT
     val keepsWergID = OUTPUTS(0).tokens(1)._1 == _WergID
-    
-    // 3. Obtener balances de entrada (SELF) y salida (OUTPUTS(0))
+
     val ergIn  = SELF.value
     val wergIn = SELF.tokens(1)._2
-    
     val ergOut  = OUTPUTS(0).value
     val wergOut = OUTPUTS(0).tokens(1)._2
-    
-    // 4. EL INVARIANTE MÁGICO: La suma total de ERG y WERG dentro de la caja no cambia.
-    // Si metes 10 ERG, debes sacar exactamente 10 WERG para que la ecuación se cumpla.
+
     val validExchange = (ergOut + wergOut) == (ergIn + wergIn)
-    
-    // Ejecutar la validación
+
     sigmaProp(isBankOutput && exactTokens && keepsNFT && keepsWergID && validExchange)
 }
 ```
 
----
+`_BankNFT` and `_WergID` are injected at compile time via `@fleet-sdk/compiler`.
 
-### 2. La Aplicación Manager (TypeScript)
+## License
 
-Para la aplicación off-chain, usaremos `@fleet-sdk/core`, que es el estándar actual para construir transacciones en Ergo.
-
-```typescript
-import { TransactionBuilder, ErgoAddress, OutputBuilder, SAFE_MIN_BOX_VALUE } from "@fleet-sdk/core";
-import { compile } from "@fleet-sdk/compiler";
-
-// Interfaces basadas en tu pseudocódigo
-export interface WergState {
-    boxId: string;
-    ergReserve: bigint;    // Cantidad de nanoERGs en la caja
-    wergReserve: bigint;   // Cantidad de WERG en la caja
-    script: string;
-}
-
-export class WrappedErgManager {
-    private readonly bankNFT: string;
-    private readonly wergTokenId: string;
-    private readonly bankTree: string; // ErgoTree compilado del ErgoScript
-    private readonly explorer: any;    // API hipotética (ej. Ergo GraphQL / Explorer API)
-    private readonly wallet: any;      // Billetera conectada (ej. Nautilus dApp Connector)
-
-    constructor(bankNFT: string, wergTokenId: string, explorerApi: any, wallet: any) {
-        this.bankNFT = bankNFT;
-        this.wergTokenId = wergTokenId;
-        this.explorer = explorerApi;
-        this.wallet = wallet;
-
-        // Compilamos el script inyectando las constantes
-        this.bankTree = compile(`
-            {
-                val isBankOutput = OUTPUTS(0).propositionBytes == SELF.propositionBytes
-                val exactTokens = OUTPUTS(0).tokens.size == 2
-                val keepsNFT    = OUTPUTS(0).tokens(0)._1 == fromBase16("${this.bankNFT}")
-                val keepsWergID = OUTPUTS(0).tokens(1)._1 == fromBase16("${this.wergTokenId}")
-                
-                val ergIn  = SELF.value
-                val wergIn = SELF.tokens(1)._2
-                val ergOut  = OUTPUTS(0).value
-                val wergOut = OUTPUTS(0).tokens(1)._2
-                
-                val validExchange = (ergOut + wergOut) == (ergIn + wergIn)
-                
-                sigmaProp(isBankOutput && exactTokens && keepsNFT && keepsWergID && validExchange)
-            }
-        `).toHex();
-    }
-
-    /**
-     * fetchTokensWERG (Equivalente al pseudocódigo)
-     * Busca la caja actual en la blockchain que contiene el NFT del banco
-     */
-    async fetchBankBox(): Promise<any> {
-        // En Ergo, la caja "Banco" es un Singleton gracias al NFT. Solo existe UNA.
-        const unspentBoxes = await this.explorer.getUnspentBoxesByTokenId(this.bankNFT);
-        if (unspentBoxes.length === 0) throw new Error("Caja WERG no encontrada en la red");
-        return unspentBoxes[0];
-    }
-
-    /**
-     * Muestra el estado actual del banco WERG (ERG Equivalente vs T)
-     */
-    async mostrarWERG(): Promise<WergState> {
-        const bankBox = await this.fetchBankBox();
-        const wergToken = bankBox.assets.find((t: any) => t.tokenId === this.wergTokenId);
-
-        return {
-            boxId: bankBox.boxId,
-            ergReserve: BigInt(bankBox.value),
-            wergReserve: BigInt(wergToken.amount),
-            script: bankBox.ergoTree
-        };
-    }
-
-    /**
-     * Intercambio ERG -> T (Wrap)
-     */
-    async wrap(amountNanoErg: bigint): Promise<string> {
-        const bankBox = await this.fetchBankBox();
-        const userUtxos = await this.wallet.getUtxos();
-        const changeAddress = await this.wallet.getChangeAddress();
-        const currentHeight = await this.explorer.getCurrentHeight();
-
-        const currentWergAmount = BigInt(bankBox.assets.find((t: any) => t.tokenId === this.wergTokenId).amount);
-        const currentErgAmount = BigInt(bankBox.value);
-
-        // Validar que hay suficiente WERG en el banco
-        if (currentWergAmount < amountNanoErg) throw new Error("El banco no tiene suficiente WERG");
-
-        // Creamos la nueva Caja Banco
-        const newBankBox = new OutputBuilder(currentErgAmount + amountNanoErg, this.bankTree)
-            .addTokens({ tokenId: this.bankNFT, amount: 1n })
-            .addTokens({ tokenId: this.wergTokenId, amount: currentWergAmount - amountNanoErg });
-
-        // Construir la transacción
-        const unsignedTx = new TransactionBuilder(currentHeight)
-            .from([bankBox, ...userUtxos]) // Inputs: [0] es la Caja Banco, [1..n] las del usuario
-            .to(newBankBox)                // Output [0]: La nueva Caja Banco actualizada
-            .sendChangeTo(changeAddress)   // El sobrante y los tokens WERG van al usuario
-            .payMinFee()
-            .build()
-            .toEIP12Object();
-
-        // Firmar y enviar
-        const signedTx = await this.wallet.signTx(unsignedTx);
-        const txId = await this.explorer.submitTx(signedTx);
-        return txId;
-    }
-
-    /**
-     * Intercambio T -> ERG (Unwrap)
-     */
-    async unwrap(amountWerg: bigint): Promise<string> {
-        const bankBox = await this.fetchBankBox();
-        const userUtxos = await this.wallet.getUtxos();
-        const changeAddress = await this.wallet.getChangeAddress();
-        const currentHeight = await this.explorer.getCurrentHeight();
-
-        const currentWergAmount = BigInt(bankBox.assets.find((t: any) => t.tokenId === this.wergTokenId).amount);
-        const currentErgAmount = BigInt(bankBox.value);
-
-        // Validar que el banco tenga suficiente ERG
-        if (currentErgAmount < amountWerg) throw new Error("El banco no tiene suficiente ERG");
-
-        // Creamos la nueva Caja Banco
-        const newBankBox = new OutputBuilder(currentErgAmount - amountWerg, this.bankTree)
-            .addTokens({ tokenId: this.bankNFT, amount: 1n })
-            .addTokens({ tokenId: this.wergTokenId, amount: currentWergAmount + amountWerg });
-
-        // Construir la transacción
-        const unsignedTx = new TransactionBuilder(currentHeight)
-            .from([bankBox, ...userUtxos]) // El usuario provee sus cajas que contienen el WERG
-            .to(newBankBox)
-            .sendChangeTo(changeAddress)   // El ERG liberado va automáticamente a la dirección de cambio
-            .payMinFee()
-            .build()
-            .toEIP12Object();
-
-        const signedTx = await this.wallet.signTx(unsignedTx);
-        const txId = await this.explorer.submitTx(signedTx);
-        return txId;
-    }
-}
-```
+MIT
