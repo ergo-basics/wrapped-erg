@@ -6,9 +6,7 @@ export { default as wrapped_erg_bank_contract } from './contracts/wrapped_erg_ba
 // Core manager + helpers
 export {
   WrappedErgManager,
-  listWrappedErgBanks,
-  fetchCurrentErgSupply,
-  fetchCurrentErgSupplyNano
+  listWrappedErgBanks
 } from './ergo/wrappedErg';
 
 export type {
@@ -26,8 +24,6 @@ export type {
 
 // Environment config
 export {
-  BANK_NFT_ID,
-  WERG_TOKEN_ID,
   EXPLORER_API,
   EXPLORER_URI_TX,
   EXPLORER_URI_TOKEN,

@@ -16,3 +16,4 @@ yarn-error.log
 *.bak
 *.tmp
 *.cache
+.codex

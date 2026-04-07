@@ -1,18 +1,6 @@
 /**
  * Network configuration for Wrapped ERG
- * 
- * Token IDs are placeholders — replace with actual deployed token IDs.
  */
-
-// ============================================================
-// TOKEN IDS — Replace these after deploying the bank box
-// ============================================================
-
-/** NFT ID that uniquely identifies the official Bank Box (singleton) */
-export const BANK_NFT_ID = '0000000000000000000000000000000000000000000000000000000000000001';
-
-/** Token ID of the WERG token */
-export const WERG_TOKEN_ID = '0000000000000000000000000000000000000000000000000000000000000002';
 
 // ============================================================
 // NETWORK CONFIG

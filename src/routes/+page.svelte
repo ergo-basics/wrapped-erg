@@ -3,7 +3,6 @@
     import { getUtxos } from 'wallet-svelte-component';
     import {
         connected,
-        address,
         bankState,
         bankLoading,
         bankError,
@@ -26,11 +25,9 @@
 
     let banks: WrappedErgBankSummary[] = [];
     let banksLoading = false;
-    let selectedBankNft = '';
     let selectedWergTokenId = '';
 
     let newBankErg = '1';
-    let newBankNftName = 'WERG Bank';
     let newBankWergName = 'WERG';
     const ERG_MAX_SUPPLY_DISPLAY = '97,739,925';
 
@@ -60,8 +57,7 @@
         try {
             const w = window as any;
             if (!w.ergo) return;
-            const ctx = getWalletContext();
-            manager = new WrappedErgManager(ctx, selectedBankNft || undefined, selectedWergTokenId || undefined);
+            manager = new WrappedErgManager(getWalletContext(), selectedWergTokenId || undefined);
             await refreshBankState();
         } catch (e) {
             console.error('Failed to init manager:', e);
@@ -72,8 +68,7 @@
         banksLoading = true;
         try {
             banks = await listWrappedErgBanks();
-            if (!selectedBankNft && banks.length > 0) {
-                selectedBankNft = banks[0].bankNft;
+            if (!selectedWergTokenId && banks.length > 0) {
                 selectedWergTokenId = banks[0].wergTokenId;
             }
         } catch (e) {
@@ -84,7 +79,6 @@
     }
 
     async function selectBank(bank: WrappedErgBankSummary) {
-        selectedBankNft = bank.bankNft;
         selectedWergTokenId = bank.wergTokenId;
         if (typeof window !== 'undefined' && $connected) {
             await initManager();
@@ -96,7 +90,7 @@
         $bankLoading = true;
         $bankError = null;
         try {
-            $bankState = await manager.getState(selectedBankNft || undefined, selectedWergTokenId || undefined);
+            $bankState = await manager.getState(selectedWergTokenId || undefined);
         } catch (e: any) {
             $bankError = e.message || 'Failed to fetch bank state';
         } finally {
@@ -158,14 +152,13 @@
         $txError = null;
         try {
             const txId = await manager.createBankWithMint({
-                nftName: newBankNftName.trim(),
                 wergName: newBankWergName.trim(),
                 initialErgReserve: parseErgToNano(newBankErg)
             });
             const record: TxRecord = {
                 txId,
-                type: 'wrap',
-                amount: `new bank: ${newBankErg} ERG (1:1 WERG)`,
+                type: 'create',
+                amount: `new bank: ${newBankErg} ERG`,
                 timestamp: Date.now(),
                 status: 'pending'
             };
@@ -197,7 +190,7 @@
     <div class="text-center space-y-4 py-4">
         <h2 class="text-3xl sm:text-4xl font-bold tracking-tight">Wrapped ERG</h2>
         <p class="text-muted-foreground max-w-2xl mx-auto">
-            Bank discovery, creation, and builder-friendly wrap/unwrap flows for downstream app integration.
+            Discovery, creation, and builder-friendly wrap/unwrap flows for generic bank boxes keyed by wrapper token.
         </p>
     </div>
 
@@ -213,10 +206,10 @@
         {:else}
             <div class="grid grid-cols-1 gap-3">
                 {#each banks as bank}
-                    <button class="text-left rounded-lg border p-4 hover:bg-secondary/40 {selectedBankNft === bank.bankNft ? 'border-primary' : 'border-border/50'}" on:click={() => selectBank(bank)}>
-                        <div class="font-medium">Bank NFT: {truncateTxId(bank.bankNft)}</div>
-                        <div class="text-sm text-muted-foreground">WERG: {truncateTxId(bank.wergTokenId)}</div>
+                    <button class="text-left rounded-lg border p-4 hover:bg-secondary/40 {selectedWergTokenId === bank.wergTokenId ? 'border-primary' : 'border-border/50'}" on:click={() => selectBank(bank)}>
+                        <div class="font-medium">Wrapper Token: {truncateTxId(bank.wergTokenId)}</div>
                         <div class="text-sm text-muted-foreground">ERG reserve: {bank.ergReserve.toString()}</div>
+                        <div class="text-sm text-muted-foreground">WERG reserve: {bank.wergReserve.toString()}</div>
                     </button>
                 {/each}
             </div>
@@ -233,8 +226,8 @@
             <div class="text-2xl font-bold font-mono">{#if $bankLoading}<span class="animate-pulse">...</span>{:else}{$wergReserveDisplay}{/if}</div>
         </div>
         <div class="rounded-xl border border-border/50 p-5 bg-card">
-            <div class="text-sm text-muted-foreground mb-1">Selected Bank</div>
-            <div class="text-sm font-mono break-all">{selectedBankNft || '---'}</div>
+            <div class="text-sm text-muted-foreground mb-1">Selected Wrapper Token</div>
+            <div class="text-sm font-mono break-all">{selectedWergTokenId || '---'}</div>
         </div>
     </div>
 
@@ -263,16 +256,11 @@
                     </div>
                 {:else}
                     <div class="space-y-5">
-                        <p class="text-sm text-muted-foreground">Creates a new bank by minting a Bank NFT and WERG tokens automatically. Three transactions will be signed: mint NFT, mint WERG, create bank box.</p>
+                        <p class="text-sm text-muted-foreground">Creates a new bank by minting the wrapper token and deploying the bank box in a single transaction. The bank stores the allowed `wergTokenId` in `R4`.</p>
                         <div>
-                            <label for="nft-name" class="block text-sm font-medium mb-1">Bank NFT Name</label>
-                            <input id="nft-name" bind:value={newBankNftName} placeholder="e.g. WERG Bank" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                            <p class="text-xs text-muted-foreground mt-1">Display name for the NFT that identifies this bank (singleton token).</p>
-                        </div>
-                        <div>
-                            <label for="werg-name" class="block text-sm font-medium mb-1">WERG Token Name</label>
+                            <label for="werg-name" class="block text-sm font-medium mb-1">Wrapper Token Name</label>
                             <input id="werg-name" bind:value={newBankWergName} placeholder="e.g. WERG" class="w-full px-4 py-3 rounded-lg bg-input border border-border" />
-                            <p class="text-xs text-muted-foreground mt-1">Display name for the wrapped ERG token that users will trade.</p>
+                            <p class="text-xs text-muted-foreground mt-1">Name used when minting the wrapper token.</p>
                         </div>
                         <div>
                             <label for="erg-reserve" class="block text-sm font-medium mb-1">Initial ERG Reserve</label>
@@ -281,7 +269,7 @@
                         </div>
                         <div class="rounded-lg bg-secondary/50 border border-border/50 p-3">
                             <p class="text-sm font-medium">WERG Total Supply: <span class="text-primary font-mono">{ERG_MAX_SUPPLY_DISPLAY} WERG</span></p>
-                            <p class="text-xs text-muted-foreground mt-1">Matches the full ERG max supply ({ERG_MAX_SUPPLY_DISPLAY} ERG). 9 decimals, 1:1 peg. The entire supply is minted upfront so no re-minting is ever needed.</p>
+                            <p class="text-xs text-muted-foreground mt-1">Matches the full ERG max supply ({ERG_MAX_SUPPLY_DISPLAY} ERG). The bank box carries only ERG, one wrapper token asset, and `R4` with that token ID.</p>
                         </div>
                         <button on:click={handleCreateBank} disabled={$txPending} class="w-full py-3 rounded-lg bg-primary text-primary-foreground font-medium">{$txPending ? 'Processing...' : 'Create Bank'}</button>
                     </div>

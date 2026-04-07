@@ -1,27 +1,27 @@
 # Wrapped ERG
 
-1:1 ERG-to-WERG exchange on the Ergo blockchain. This repo is both a **web app** and a **reusable TypeScript library**.
+1:1 ERG-to-WERG exchange on the Ergo blockchain. This repo is both a web app and a reusable TypeScript library.
 
 Based on [ergo-basics/template](https://github.com/ergo-basics/template).
 
-## What it does
+## What It Does
 
-A "bank box" on Ergo holds ERG and WERG tokens behind a smart contract that enforces a simple invariant:
+A bank box on Ergo holds native ERG plus exactly one wrapper token. The box stores the allowed `wergTokenId` in `R4[Coll[Byte]]`, and the contract enforces:
 
-```
+```text
 ERG_in + WERG_in == ERG_out + WERG_out
 ```
 
-Deposit ERG, receive the same amount of WERG. Return WERG, get your ERG back. The bank NFT makes each bank a singleton — only one unspent box per bank exists at any time.
+Deposit ERG, receive the same amount of WERG. Return WERG, get your ERG back. Each bank is identified by its wrapper token ID, not by a separate NFT.
 
 ## Web App
 
 The SvelteKit app provides:
 
-- **Bank discovery** — lists all deployed WERG banks on-chain
-- **Wrap / Unwrap** — exchange ERG for WERG and back
-- **Create Bank** — auto-mints a Bank NFT + WERG token and deploys a new bank box (3-step transaction flow)
-- **Wallet integration** — connects via [wallet-svelte-component](https://github.com/ergo-basics/wallet-svelte-component) (Nautilus, SAFEW)
+- Bank discovery by scanning unspent boxes of the shared bank contract
+- Wrap / Unwrap flows against the selected wrapper token
+- Create Bank with a single mint+deploy transaction
+- Wallet integration via [wallet-svelte-component](https://github.com/ergo-basics/wallet-svelte-component)
 
 ### Run locally
 
@@ -49,29 +49,23 @@ npm install ergo-basics/wrapped-erg
 ```ts
 import { WrappedErgManager, listWrappedErgBanks } from 'wrapped-erg';
 
-// List all banks on-chain
 const banks = await listWrappedErgBanks();
+const manager = new WrappedErgManager(wallet, banks[0]?.wergTokenId);
 
-// Create a manager with your wallet context
-const manager = new WrappedErgManager(wallet, bankNftId, wergTokenId);
-
-// One-liner wrap (sign + submit)
-const txId = await manager.wrap(1_000_000_000n); // 1 ERG
+const txId = await manager.wrap(1_000_000_000n);
 ```
 
-### Builder pattern (for chained transactions)
+### Builder pattern
 
 The `*Builder` methods return a `TransactionBuilder` so you can customize before signing:
 
 ```ts
-// Get a builder, add extra outputs, change fee, then finalize
 const builder = await manager.wrapBuilder({ amountNanoErg: 1_000_000_000n });
 const unsignedTx = builder
   .payFee(2_000_000n)
   .build()
   .toEIP12Object();
 
-// Sign with your own flow
 const signed = await wallet.signTx(unsignedTx);
 ```
 
@@ -83,75 +77,80 @@ Create a brand new bank without pre-existing tokens:
 
 ```ts
 const txId = await manager.createBankWithMint({
-  nftName: 'My WERG Bank',
   wergName: 'WERG',
-  wergSupply: 1_000_000n,
-  initialErgReserve: 1_000_000_000n // 1 ERG
+  initialErgReserve: 1_000_000_000n
 });
 ```
 
-This executes 3 transactions: mint NFT, mint WERG token, create bank box.
+This executes a single transaction: mint wrapper token + create bank box.
 
 ### Convenience methods
 
 ```ts
 await manager.wrap(1_000_000_000n);
 await manager.unwrap(500_000_000n);
-await manager.createBank({ bankNft, wergTokenId, initialErgReserve, initialWergReserve });
+await manager.createBank({ wergTokenId, initialErgReserve, initialWergReserve });
 ```
 
 ### Exports
 
 ```ts
-// Core
 import { WrappedErgManager, listWrappedErgBanks } from 'wrapped-erg';
 
-// Types
 import type {
-  WergState, ExplorerBox, WrappedErgBankSummary,
-  CreateBankParams, CreateBankWithMintParams,
-  WrapParams, UnwrapParams, UnsignedTxLike, WrappedErgTxBuilder
+  WergState,
+  ExplorerBox,
+  WrappedErgBankSummary,
+  CreateBankParams,
+  CreateBankWithMintParams,
+  WrapParams,
+  UnwrapParams,
+  UnsignedTxLike,
+  WrappedErgTxBuilder
 } from 'wrapped-erg';
 
-// Contract source
 import { wrapped_erg_bank_contract } from 'wrapped-erg';
 
-// Config constants
 import {
-  BANK_NFT_ID, WERG_TOKEN_ID, EXPLORER_API,
-  NANOERG_PER_ERG, MIN_BOX_VALUE, DEFAULT_FEE
-} from 'wrapped-erg';
-
-// Svelte stores (for SvelteKit apps)
-import {
-  address, connected, bankState, bankLoading,
-  ergReserveDisplay, wergReserveDisplay, formatErg, parseErgToNano
+  EXPLORER_API,
+  NANOERG_PER_ERG,
+  MIN_BOX_VALUE,
+  DEFAULT_FEE
 } from 'wrapped-erg';
 ```
 
 ## Smart Contract
 
-The ErgoScript bank contract:
+The contract is generic. Every valid bank box must:
+
+- keep the same ErgoTree in `OUTPUTS(0)`
+- keep exactly one token in `SELF` and `OUTPUTS(0)`
+- store that token ID in `R4[Coll[Byte]]`
+- ensure the token ID in the asset list matches `R4`
+- preserve `ERG + WERG`
 
 ```scala
 {
     val isBankOutput = OUTPUTS(0).propositionBytes == SELF.propositionBytes
-    val exactTokens = OUTPUTS(0).tokens.size == 2
-    val keepsNFT    = OUTPUTS(0).tokens(0)._1 == _BankNFT
-    val keepsWergID = OUTPUTS(0).tokens(1)._1 == _WergID
+    val exactTokens = SELF.tokens.size == 1 && OUTPUTS(0).tokens.size == 1
 
-    val ergIn  = SELF.value
-    val wergIn = SELF.tokens(1)._2
-    val ergOut  = OUTPUTS(0).value
-    val wergOut = OUTPUTS(0).tokens(1)._2
+    val hasR4 = SELF.R4[Coll[Byte]].isDefined && OUTPUTS(0).R4[Coll[Byte]].isDefined
+    val selfWergId = SELF.R4[Coll[Byte]].getOrElse(SELF.tokens(0)._1)
+    val outWergId = OUTPUTS(0).R4[Coll[Byte]].getOrElse(OUTPUTS(0).tokens(0)._1)
 
-    val validExchange = (ergOut + wergOut) == (ergIn + wergIn)
+    val validExchange = (OUTPUTS(0).value + OUTPUTS(0).tokens(0)._2) == (SELF.value + SELF.tokens(0)._2)
 
-    sigmaProp(isBankOutput && exactTokens && keepsNFT && keepsWergID && validExchange)
+    sigmaProp(
+      isBankOutput &&
+      exactTokens &&
+      hasR4 &&
+      SELF.tokens(0)._1 == selfWergId &&
+      OUTPUTS(0).tokens(0)._1 == outWergId &&
+      selfWergId == outWergId &&
+      validExchange
+    )
 }
 ```
-
-`_BankNFT` and `_WergID` are injected at compile time via `@fleet-sdk/compiler`.
 
 ## License
 

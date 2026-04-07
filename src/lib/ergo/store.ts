@@ -27,7 +27,7 @@ export const bankError = writable<string | null>(null);
 // ============================================================
 export interface TxRecord {
     txId: string;
-    type: 'wrap' | 'unwrap';
+    type: 'wrap' | 'unwrap' | 'create';
     amount: string; // human-readable ERG amount
     timestamp: number;
     status: 'pending' | 'confirmed' | 'failed';
