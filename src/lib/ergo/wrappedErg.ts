@@ -228,9 +228,9 @@ export class WrappedErgManager {
     const changeAddress = await this.wallet.getChangeAddress();
     const currentHeight = await fetchCurrentHeight();
 
-    // WERG total supply = current ERG circulating supply (queried from chain height)
-    // The full circulating supply is minted and placed in the bank. Users swap 1:1.
-    const wergSupply = calcCirculatingSupplyNano(currentHeight);
+    // WERG total supply = full ERG max supply (97,739,925 ERG)
+    // Mint the entire max supply so no re-minting is ever needed.
+    const wergSupply = ERG_MAX_SUPPLY_NANO;
 
     // STEP 1: Mint the Bank NFT (amount: 1)
     // Token ID will be the first input's box ID
