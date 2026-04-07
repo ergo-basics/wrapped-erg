@@ -38,10 +38,10 @@ npm run deploy
 
 ## Library Usage
 
-Install from the repo or npm (once published):
+Install from npm:
 
 ```bash
-npm install wrapped-erg
+npm install ergo-basics/wrapped-erg
 ```
 
 ### Quick start
